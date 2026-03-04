@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Simulador de Ciclos de Potencia de Gas</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#f0f9ff', 100:'#e0f2fe', 500:'#0ea5e9', 600:'#0284c7', 700:'#0369a1', 900:'#0c4a6e' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background: #0a0e1a; font-family: 'Segoe UI', sans-serif; }
+    .glass { background: rgba(255,255,255,0.04); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); }
+    .glow-blue { box-shadow: 0 0 20px rgba(14,165,233,0.3); }
+    .glow-green { box-shadow: 0 0 20px rgba(34,197,94,0.3); }
+    .glow-orange { box-shadow: 0 0 20px rgba(249,115,22,0.3); }
+    input[type=range] { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 3px; outline: none; cursor: pointer; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 2px solid white; }
+    .otto-color input[type=range] { background: linear-gradient(to right, #3b82f6, #1d4ed8); }
+    .otto-color input[type=range]::-webkit-slider-thumb { background: #60a5fa; }
+    .diesel-color input[type=range] { background: linear-gradient(to right, #22c55e, #15803d); }
+    .diesel-color input[type=range]::-webkit-slider-thumb { background: #4ade80; }
+    .brayton-color input[type=range] { background: linear-gradient(to right, #f97316, #c2410c); }
+    .brayton-color input[type=range]::-webkit-slider-thumb { background: #fb923c; }
+    .tab-btn { transition: all 0.3s ease; }
+    .tab-btn.active-otto { background: rgba(59,130,246,0.2); border-color: #3b82f6; color: #60a5fa; }
+    .tab-btn.active-diesel { background: rgba(34,197,94,0.2); border-color: #22c55e; color: #4ade80; }
+    .tab-btn.active-brayton { background: rgba(249,115,22,0.2); border-color: #f97316; color: #fb923c; }
+    .metric-card { transition: transform 0.2s; }
+    .metric-card:hover { transform: translateY(-2px); }
+    .chart-container { position: relative; height: 380px; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    .fade-in { animation: fadeIn 0.4s ease; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; }
+  </style>
+</head>
+<body class="min-h-screen text-white p-4 md:p-8">
+
+  <!-- Header -->
+  <div class="max-w-7xl mx-auto mb-8">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 flex items-center justify-center text-xl">⚙️</div>
+      <div>
+        <h1 class="text-2xl md:text-3xl font-bold bg-gradient-to-r from-sky-400 to-blue-300 bg-clip-text text-transparent">
+          Simulador de Ciclos de Potencia de Gas
+        </h1>
+        <p class="text-slate-400 text-sm">Análisis termodinámico — Aire Estándar Ideal (γ = 1.4)</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="max-w-7xl mx-auto grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+    <!-- LEFT PANEL: Controls -->
+    <div class="xl:col-span-1 space-y-5">
+
+      <!-- Cycle Selector -->
+      <div class="glass rounded-2xl p-5">
+        <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-widest mb-4">Selección de Ciclo</h2>
+        <div class="grid grid-cols-3 gap-2">
+          <button onclick="setCycle('otto')" id="btn-otto"
+            class="tab-btn border border-slate-700 rounded-xl py-3 px-2 text-center text-xs font-bold uppercase tracking-wide text-slate-400 active-otto">
+            <div class="text-2xl mb-1">🔵</div>Otto
+          </button>
+          <button onclick="setCycle('diesel')" id="btn-diesel"
+            class="tab-btn border border-slate-700 rounded-xl py-3 px-2 text-center text-xs font-bold uppercase tracking-wide text-slate-400">
+            <div class="text-2xl mb-1">🟢</div>Diesel
+          </button>
+          <button onclick="setCycle('brayton')" id="btn-brayton"
+            class="tab-btn border border-slate-700 rounded-xl py-3 px-2 text-center text-xs font-bold uppercase tracking-wide text-slate-400">
+            <div class="text-2xl mb-1">🟠</div>Brayton
+          </button>
+        </div>
+        <div id="cycle-description" class="mt-4 text-xs text-slate-400 leading-relaxed glass rounded-xl p-3"></div>
+      </div>
+
+      <!-- Sliders -->
+      <div class="glass rounded-2xl p-5" id="slider-panel">
+        <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-widest mb-4">Parámetros de Control</h2>
+        <div id="sliders-container" class="space-y-5"></div>
+      </div>
+
+      <!-- Thermodynamic States Table -->
+      <div class="glass rounded-2xl p-5">
+        <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-widest mb-3">Estados Termodinámicos</h2>
+        <div id="states-table" class="text-xs space-y-2"></div>
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL: Chart + Results -->
+    <div class="xl:col-span-2 space-y-5">
+
+      <!-- PV Diagram -->
+      <div class="glass rounded-2xl p-5 glow-blue">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-widest">Diagrama P-V</h2>
+          <span id="cycle-badge" class="badge bg-blue-500/20 text-blue-300 border border-blue-500/40">CICLO OTTO</span>
+        </div>
+        <div class="chart-container">
+          <canvas id="pvChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Metrics -->
+      <div class="grid grid-cols-3 gap-4">
+        <div class="metric-card glass rounded-2xl p-4 text-center">
+          <div class="text-xs text-slate-400 uppercase tracking-widest mb-2">Trabajo Neto</div>
+          <div id="metric-wnet" class="text-2xl font-bold text-sky-400">—</div>
+          <div class="text-xs text-slate-500 mt-1">kJ/kg</div>
+        </div>
+        <div class="metric-card glass rounded-2xl p-4 text-center">
+          <div class="text-xs text-slate-400 uppercase tracking-widest mb-2">P.M.E.</div>
+          <div id="metric-mep" class="text-2xl font-bold text-emerald-400">—</div>
+          <div class="text-xs text-slate-500 mt-1">kPa</div>
+        </div>
+        <div class="metric-card glass rounded-2xl p-4 text-center">
+          <div class="text-xs text-slate-400 uppercase tracking-widest mb-2">Rendimiento η</div>
+          <div id="metric-eta" class="text-2xl font-bold text-amber-400">—</div>
+          <div class="text-xs text-slate-500 mt-1">%</div>
+        </div>
+      </div>
+
+      <!-- Comparison Table -->
+      <div class="glass rounded-2xl p-5">
+        <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-widest mb-4">Comparativa de Ciclos (mismo r)</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-slate-500 text-xs uppercase tracking-widest border-b border-slate-700/50">
+                <th class="pb-3 text-left">Ciclo</th>
+                <th class="pb-3 text-right">η Térmico</th>
+                <th class="pb-3 text-right">W<sub>neto</sub> (kJ/kg)</th>
+                <th class="pb-3 text-right">PME (kPa)</th>
+                <th class="pb-3 text-right">Clasificación η</th>
+              </tr>
+            </thead>
+            <tbody id="comparison-body" class="divide-y divide-slate-800"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Engineering Observations -->
+      <div class="glass rounded-2xl p-5 border border-amber-500/20" style="background:rgba(245,158,11,0.04)">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-amber-400 text-lg">⚠️</span>
+          <h2 class="text-sm font-semibold text-amber-400 uppercase tracking-widest">Observaciones de Ingeniería</h2>
+        </div>
+        <div id="engineering-notes" class="text-xs text-slate-300 space-y-2 leading-relaxed"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ============================================================
+// CONSTANTS & STATE
+// ============================================================
+const gamma = 1.4;
+const cv = 0.718; // kJ/kg·K
+const cp = 1.005; // kJ/kg·K
+const R  = 0.287; // kJ/kg·K
+const T1 = 300;   // K (estado 1, inicial)
+const P1 = 100;   // kPa
+const v1 = R * T1 / P1; // m³/kg
+
+let currentCycle = 'otto';
+let pvChart = null;
+
+const params = {
+  otto:   { r: 8, qin: 1800 },
+  diesel: { r: 16, rc: 2.5, qin: 1800 },
+  brayton:{ rp: 10, qin: 1200 }
+};
+
+// ============================================================
+// CYCLE DESCRIPTIONS
+// ============================================================
+const cycleDescriptions = {
+  otto: `<strong class="text-blue-400">Ciclo Otto</strong>: Modela motores de gasolina de encendido por chispa (MEP). La combustión ocurre a <em>volumen constante</em>. Procesos: 1→2 Compresión isentrópica, 2→3 Adición de calor (V=cte), 3→4 Expansión isentrópica, 4→1 Rechazo de calor (V=cte).`,
+  diesel: `<strong class="text-green-400">Ciclo Diesel</strong>: Modela motores de encendido por compresión (MEC). La combustión ocurre a <em>presión constante</em>. Relación de corte r_c = V₃/V₂ controla la cantidad de calor. Mayor r → mayor η, pero disminuye con r_c.`,
+  brayton: `<strong class="text-orange-400">Ciclo Brayton</strong>: Modela turbinas de gas y motores a reacción. Opera en <em>flujo continuo</em>. Procesos: 1→2 Compresión isentrópica, 2→3 Adición de calor (P=cte), 3→4 Expansión isentrópica, 4→1 Rechazo de calor (P=cte).`
+};
+
+// ============================================================
+// SLIDER CONFIGURATIONS
+// ============================================================
+const sliderConfigs = {
+  otto: [
+    { id:'r', label:'Relación de Compresión (r)', min:4, max:16, step:0.5, unit:'', color:'otto-color' },
+    { id:'qin', label:'Calor Aportado (q_in)', min:600, max:3000, step:100, unit:' kJ/kg', color:'otto-color' }
+  ],
+  diesel: [
+    { id:'r',  label:'Relación de Compresión (r)',   min:12, max:24, step:0.5, unit:'', color:'diesel-color' },
+    { id:'rc', label:'Relación de Corte (r_c)',       min:1.2, max:4.0, step:0.1, unit:'', color:'diesel-color' },
+    { id:'qin',label:'Calor Aportado (q_in)',         min:600, max:3000, step:100, unit:' kJ/kg', color:'diesel-color' }
+  ],
+  brayton: [
+    { id:'rp',  label:'Relación de Presiones (r_p)',  min:2, max:30, step:0.5, unit:'', color:'brayton-color' },
+    { id:'qin', label:'Calor Aportado (q_in)',         min:400, max:2000, step:100, unit:' kJ/kg', color:'brayton-color' }
+  ]
+};
+
+// ============================================================
+// THERMODYNAMIC CALCULATIONS
+// ============================================================
+function calcOtto() {
+  const { r, qin } = params.otto;
+  const v2 = v1 / r;
+  const T2 = T1 * Math.pow(r, gamma - 1);
+  const P2 = P1 * Math.pow(r, gamma);
+  const T3 = T2 + qin / cv;
+  const P3 = P2 * (T3 / T2);
+  const v3 = v2;
+  const v4 = v1;
+  const T4 = T3 * Math.pow(v3/v4, gamma-1);
+  const P4 = P3 * Math.pow(v3/v4, gamma);
+  const qout = cv * (T4 - T1);
+  const wnet = qin - qout;
+  const eta = 1 - 1/Math.pow(r, gamma-1);
+  const mep = wnet / (v1 - v2);
+  return { states:[
+    {n:1,T:T1,P:P1,v:v1},{n:2,T:T2,P:P2,v:v2},
+    {n:3,T:T3,P:P3,v:v3},{n:4,T:T4,P:P4,v:v4}
+  ], wnet, eta, mep, qin, qout };
+}
+
+function calcDiesel() {
+  const { r, rc, qin } = params.diesel;
+  const v2 = v1 / r;
+  const T2 = T1 * Math.pow(r, gamma-1);
+  const P2 = P1 * Math.pow(r, gamma);
+  const T3 = T2 + qin / cp;
+  const P3 = P2;
+  const v3 = v2 * (T3 / T2);
+  const v4 = v1;
+  const T4 = T3 * Math.pow(v3/v4, gamma-1);
+  const P4 = P3 * Math.pow(v3/v4, gamma);
+  const qout = cv * (T4 - T1);
+  const wnet = qin - qout;
+  const rcActual = v3/v2;
+  const eta = 1 - (1/Math.pow(r,gamma-1)) * ((Math.pow(rcActual,gamma)-1)/(gamma*(rcActual-1)));
+  const mep = wnet / (v1 - v2);
+  return { states:[
+    {n:1,T:T1,P:P1,v:v1},{n:2,T:T2,P:P2,v:v2},
+    {n:3,T:T3,P:P3,v:v3},{n:4,T:T4,P:P4,v:v4}
+  ], wnet, eta, mep, qin, qout, rcActual };
+}
+
+function calcBrayton() {
+  const { rp, qin } = params.brayton;
+  const T2 = T1 * Math.pow(rp, (gamma-1)/gamma);
+  const P2 = P1 * rp;
+  const T3 = T2 + qin / cp;
+  const P3 = P2;
+  // Use pseudo-specific volumes for P-V diagram (P·v = R·T)
+  const v2 = R * T2 / P2;
+  const v3 = R * T3 / P3;
+  const P4 = P1;
+  const T4 = T3 / Math.pow(rp, (gamma-1)/gamma);
+  const v4 = R * T4 / P4;
+  const qout = cp * (T4 - T1);
+  const wnet = qin - qout;
+  const eta = 1 - 1/Math.pow(rp, (gamma-1)/gamma);
+  const mep = wnet / (v1 - v2);
+  return { states:[
+    {n:1,T:T1,P:P1,v:v1},{n:2,T:T2,P:P2,v:v2},
+    {n:3,T:T3,P:P3,v:v3},{n:4,T:T4,P:P4,v:v4}
+  ], wnet, eta, mep, qin, qout };
+}
+
+// ============================================================
+// PV CURVE GENERATORS
+// ============================================================
+function isentropicCurve(v_a, P_a, v_b, n=60) {
+  const pts = [];
+  const c = P_a * Math.pow(v_a, gamma);
+  for (let i=0;i<=n;i++) {
+    const v = v_a + (v_b - v_a)*(i/n);
+    const P = c / Math.pow(v, gamma);
+    pts.push({x: v, y: P});
+  }
+  return pts;
+}
+
+function buildOttoCurve(st) {
+  const [s1,s2,s3,s4] = st;
+  return [
+    ...isentropicCurve(s1.v, s1.P, s2.v),
+    {x:s2.v, y:s2.P}, {x:s3.v, y:s3.P}, // vertical line (v=cte)
+    ...isentropicCurve(s3.v, s3.P, s4.v),
+    {x:s4.v, y:s4.P}, {x:s1.v, y:s1.P}  // vertical line back
+  ];
+}
+
+function buildDieselCurve(st) {
+  const [s1,s2,s3,s4] = st;
+  // 2→3 at constant pressure
+  const cp23 = [];
+  for (let i=0;i<=20;i++) {
+    const v = s2.v + (s3.v-s2.v)*(i/20);
+    cp23.push({x:v, y:s2.P});
+  }
+  return [
+    ...isentropicCurve(s1.v, s1.P, s2.v),
+    ...cp23,
+    ...isentropicCurve(s3.v, s3.P, s4.v),
+    {x:s4.v, y:s4.P}, {x:s1.v, y:s1.P}
+  ];
+}
+
+function buildBraytonCurve(st) {
+  const [s1,s2,s3,s4] = st;
+  // Isobaric 2→3
+  const cp23 = [];
+  for (let i=0;i<=20;i++) {
+    const v = s2.v + (s3.v-s2.v)*(i/20);
+    cp23.push({x:v, y:s2.P});
+  }
+  // Isobaric 4→1
+  const cp41 = [];
+  for (let i=0;i<=20;i++) {
+    const v = s4.v + (s1.v-s4.v)*(i/20);
+    cp41.push({x:v, y:s4.P});
+  }
+  return [
+    ...isentropicCurve(s1.v, s1.P, s2.v),
+    ...cp23,
+    ...isentropicCurve(s3.v, s3.P, s4.v),
+    ...cp41
+  ];
+}
+
+// ============================================================
+// CHART
+// ============================================================
+const colors = {
+  otto:   { line:'#60a5fa', fill:'rgba(59,130,246,0.15)', point:'#93c5fd' },
+  diesel: { line:'#4ade80', fill:'rgba(34,197,94,0.15)',  point:'#86efac' },
+  brayton:{ line:'#fb923c', fill:'rgba(249,115,22,0.15)', point:'#fdba74' }
+};
+
+function initChart() {
+  const ctx = document.getElementById('pvChart').getContext('2d');
+  pvChart = new Chart(ctx, {
+    type: 'scatter',
+    data: { datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 500, easing: 'easeInOutQuart' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `v = ${ctx.parsed.x.toFixed(4)} m³/kg  |  P = ${ctx.parsed.y.toFixed(1)} kPa`
+          },
+          backgroundColor: 'rgba(15,23,42,0.9)',
+          borderColor: 'rgba(148,163,184,0.3)',
+          borderWidth: 1,
+          titleColor: '#94a3b8',
+          bodyColor: '#e2e8f0'
+        }
+      },
+      scales: {
+        x: {
+          title: { display:true, text:'Volumen específico v (m³/kg)', color:'#94a3b8', font:{size:11} },
+          grid: { color:'rgba(148,163,184,0.1)' },
+          ticks: { color:'#64748b', font:{size:10} }
+        },
+        y: {
+          title: { display:true, text:'Presión P (kPa)', color:'#94a3b8', font:{size:11} },
+          grid: { color:'rgba(148,163,184,0.1)' },
+          ticks: { color:'#64748b', font:{size:10} }
+        }
+      }
+    }
+  });
+}
+
+function updateChart(cycle, result) {
+  const col = colors[cycle];
+  const pts = cycle === 'otto' ? buildOttoCurve(result.states)
+            : cycle === 'diesel' ? buildDieselCurve(result.states)
+            : buildBraytonCurve(result.states);
+
+  const statePoints = result.states.map(s => ({x:s.v, y:s.P}));
+  const labels = result.states.map(s => `Estado ${s.n}`);
+
+  pvChart.data.datasets = [
+    {
+      label: 'Ciclo',
+      data: pts,
+      showLine: true,
+      fill: true,
+      backgroundColor: col.fill,
+      borderColor: col.line,
+      borderWidth: 2.5,
+      pointRadius: 0,
+      tension: 0
+    },
+    {
+      label: 'Estados',
+      data: statePoints,
+      showLine: false,
+      pointRadius: 7,
+      pointHoverRadius: 10,
+      backgroundColor: col.point,
+      borderColor: '#0f172a',
+      borderWidth: 2,
+      pointStyle: 'circle'
+    }
+  ];
+
+  // Dynamic axis ranges
+  const allV = pts.map(p=>p.x);
+  const allP = pts.map(p=>p.y);
+  const minV = Math.min(...allV)*0.9, maxV = Math.max(...allV)*1.1;
+  const minP = 0, maxP = Math.max(...allP)*1.1;
+
+  pvChart.options.scales.x.min = minV;
+  pvChart.options.scales.x.max = maxV;
+  pvChart.options.scales.y.min = minP;
+  pvChart.options.scales.y.max = maxP;
+
+  pvChart.update();
+
+  // Annotate state numbers via custom plugin (simple approach with afterDraw)
+  pvChart._stateLabels = result.states;
+  pvChart._stateColor = col.point;
+}
+
+// Custom plugin to draw state labels
+Chart.register({
+  id: 'stateLabels',
+  afterDraw(chart) {
+    if (!chart._stateLabels) return;
+    const ctx = chart.ctx;
+    const xScale = chart.scales.x;
+    const yScale = chart.scales.y;
+    ctx.save();
+    chart._stateLabels.forEach((s,i) => {
+      const x = xScale.getPixelForValue(s.v);
+      const y = yScale.getPixelForValue(s.P);
+      ctx.fillStyle = chart._stateColor || '#fff';
+      ctx.font = 'bold 12px Segoe UI';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(`(${s.n})`, x, y - 8);
+    });
+    ctx.restore();
+  }
+});
+
+// ============================================================
+// UI BUILDERS
+// ============================================================
+function buildSliders(cycle) {
+  const container = document.getElementById('sliders-container');
+  container.innerHTML = '';
+  sliderConfigs[cycle].forEach(cfg => {
+    const val = params[cycle][cfg.id];
+    const div = document.createElement('div');
+    div.className = `${cfg.color}`;
+    div.innerHTML = `
+      <div class="flex justify-between items-center mb-1">
+        <label class="text-xs text-slate-300">${cfg.label}</label>
+        <span class="text-xs font-bold text-white" id="val-${cfg.id}">${val}${cfg.unit}</span>
+      </div>
+      <input type="range" id="slider-${cfg.id}" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${val}" class="w-full"
+        oninput="onSlider('${cycle}','${cfg.id}','${cfg.unit}',this.value)">
+      <div class="flex justify-between text-slate-600 text-xs mt-1">
+        <span>${cfg.min}</span><span>${cfg.max}</span>
+      </div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+function onSlider(cycle, id, unit, value) {
+  params[cycle][id] = parseFloat(value);
+  document.getElementById(`val-${id}`).textContent = parseFloat(value).toFixed(1) + unit;
+  updateAll();
+}
+
+function buildStatesTable(states) {
+  const el = document.getElementById('states-table');
+  el.innerHTML = `
+    <div class="grid grid-cols-4 gap-1 text-slate-500 text-center uppercase tracking-widest border-b border-slate-700/50 pb-2 mb-2">
+      <span>Estado</span><span>T (K)</span><span>P (kPa)</span><span>v (m³/kg)</span>
+    </div>
+    ${states.map(s=>`
+      <div class="grid grid-cols-4 gap-1 text-center py-1 rounded-lg hover:bg-white/5 transition-colors">
+        <span class="font-bold text-sky-400">(${s.n})</span>
+        <span>${s.T.toFixed(0)}</span>
+        <span>${s.P.toFixed(0)}</span>
+        <span>${s.v.toFixed(4)}</span>
+      </div>
+    `).join('')}
+  `;
+}
+
+function updateMetrics(result) {
+  document.getElementById('metric-wnet').textContent = result.wnet.toFixed(1);
+  document.getElementById('metric-mep').textContent  = result.mep.toFixed(0);
+  document.getElementById('metric-eta').textContent  = (result.eta*100).toFixed(1) + '%';
+}
+
+// ============================================================
+// COMPARISON TABLE
+// ============================================================
+function updateComparison() {
+  // Use same r value from current cycle for fair comparison
+  let r = params[currentCycle].r || params[currentCycle].rp || 8;
+  const qin = 1800;
+
+  // Otto
+  const etaOtto = 1 - 1/Math.pow(r, gamma-1);
+  const T2o = T1*Math.pow(r,gamma-1);
+  const P2o = P1*Math.pow(r,gamma);
+  const T3o = T2o + qin/cv;
+  const T4o = T3o*Math.pow(1/r,gamma-1);
+  const wOtto = qin - cv*(T4o-T1);
+  const v2o = v1/r;
+  const mepOtto = wOtto/(v1-v2o);
+
+  // Diesel (rc=2.0)
+  const rc = 2.0;
+  const etaDiesel = 1 - (1/Math.pow(r,gamma-1))*((Math.pow(rc,gamma)-1)/(gamma*(rc-1)));
+  const T2d = T1*Math.pow(r,gamma-1);
+  const T3d = T2d*rc;
+  const T4d = T3d*Math.pow(rc/r,gamma-1);
+  const qinD = cp*(T3d-T2d);
+  const wDiesel = qinD - cv*(T4d-T1);
+  const v2d = v1/r;
+  const mepDiesel = wDiesel/(v1-v2d);
+
+  // Brayton (use rp=r)
+  const etaBrayton = 1 - 1/Math.pow(r,(gamma-1)/gamma);
+  const T2b = T1*Math.pow(r,(gamma-1)/gamma);
+  const T3b = T2b + qin/cp;
+  const T4b = T3b/Math.pow(r,(gamma-1)/gamma);
+  const wBrayton = qin - cp*(T4b-T1);
+  const v2b = R*T2b/(P1*r);
+  const mepBrayton = wBrayton/(v1-v2b);
+
+  const rows = [
+    { name:'Otto',    color:'text-blue-400',   eta:etaOtto,   w:wOtto,   mep:mepOtto,   rank:1 },
+    { name:'Diesel',  color:'text-green-400',  eta:etaDiesel, w:wDiesel, mep:mepDiesel, rank:2 },
+    { name:'Brayton', color:'text-orange-400', eta:etaBrayton,w:wBrayton,mep:mepBrayton,rank:3 }
+  ].sort((a,b)=>b.eta-a.eta).map((r,i)=>({...r,rank:i+1}));
+
+  const medals = ['🥇','🥈','🥉'];
+  const tbody = document.getElementById('comparison-body');
+  tbody.innerHTML = rows.map((row,i)=>`
+    <tr class="hover:bg-white/5 transition-colors">
+      <td class="py-3 ${row.color} font-semibold">${row.name}</td>
+      <td class="py-3 text-right font-mono">${(row.eta*100).toFixed(1)}%</td>
+      <td class="py-3 text-right font-mono">${row.w.toFixed(1)}</td>
+      <td class="py-3 text-right font-mono">${isFinite(row.mep)?row.mep.toFixed(0):'—'}</td>
+      <td class="py-3 text-right">${medals[i]}</td>
+    </tr>
+  `).join('');
+}
+
+// ============================================================
+// ENGINEERING NOTES
+// ============================================================
+const engineeringNotes = {
+  otto: [
+    { icon:'🔥', text:'<strong>Pérdidas por fricción</strong>: La fricción mecánica entre pistón, anillos y cigüeñal reduce el trabajo neto real en ~10–15%.' },
+    { icon:'💨', text:'<strong>Transferencia de calor</strong>: Las paredes del cilindro disipan calor durante la combustión (hasta 30% del calor aportado).' },
+    { icon:'⏱️', text:'<strong>Combustión no instantánea</strong>: La llama tarda ~2–3 ms en propagarse; el proceso real no es a V constante estricto.' },
+    { icon:'🔩', text:'<strong>Detonación (knock)</strong>: Limita la relación de compresión real a r ≈ 8–12 para gasolina regular (RON 87–95).' }
+  ],
+  diesel: [
+    { icon:'💧', text:'<strong>Inyección y mezcla imperfecta</strong>: La combustión heterogénea difusa genera zonas locales ricas/pobres que reducen η.' },
+    { icon:'🌡️', text:'<strong>Alta temperatura de escape</strong>: La mayor r genera más trabajo, pero también más energía residual en los gases de escape.' },
+    { icon:'⚙️', text:'<strong>Pérdidas por bombeo</strong>: El ciclo de renovación de carga (admisión/escape) consume ~5–8% del trabajo indicado.' },
+    { icon:'📊', text:'<strong>η real típico</strong>: Motores Diesel modernos alcanzan η ≈ 40–50%, frente al ideal de 55–65%.' }
+  ],
+  brayton: [
+    { icon:'🌀', text:'<strong>Irreversibilidades del compresor/turbina</strong>: Las eficiencias isentrópicas reales son η_c ≈ 80–87% y η_t ≈ 85–92%, degradando significativamente el rendimiento neto.' },
+    { icon:'🔄', text:'<strong>Pérdidas de presión</strong>: La cámara de combustión y los conductos introducen caídas de ~3–5%, reduciendo el trabajo de la turbina.' },
+    { icon:'🌡️', text:'<strong>Temperatura de entrada a la turbina (TET)</strong>: Limitada por los materiales (~1400–1700 K con refrigeración), vs. los valores ideales calculados.' },
+    { icon:'♻️', text:'<strong>Regeneración</strong>: Un intercambiador de calor puede recuperar hasta ~40% del calor de escape, mejorando η en ~15–20 puntos porcentuales.' }
+  ]
+};
+
+function updateEngineeringNotes(cycle) {
+  const el = document.getElementById('engineering-notes');
+  el.innerHTML = engineeringNotes[cycle].map(n=>
+    `<div class="flex gap-2 items-start"><span>${n.icon}</span><p>${n.text}</p></div>`
+  ).join('');
+}
+
+// ============================================================
+// BADGE & BUTTON UPDATES
+// ============================================================
+const badgeClasses = {
+  otto:   'bg-blue-500/20 text-blue-300 border border-blue-500/40',
+  diesel: 'bg-green-500/20 text-green-300 border border-green-500/40',
+  brayton:'bg-orange-500/20 text-orange-300 border border-orange-500/40'
+};
+const badgeLabels = { otto:'CICLO OTTO', diesel:'CICLO DIESEL', brayton:'CICLO BRAYTON' };
+
+function updateBadge(cycle) {
+  const badge = document.getElementById('cycle-badge');
+  badge.className = `badge ${badgeClasses[cycle]}`;
+  badge.textContent = badgeLabels[cycle];
+}
+
+// ============================================================
+// MAIN UPDATE
+// ============================================================
+function updateAll() {
+  let result;
+  if (currentCycle === 'otto')    result = calcOtto();
+  else if (currentCycle==='diesel') result = calcDiesel();
+  else                             result = calcBrayton();
+
+  updateChart(currentCycle, result);
+  updateMetrics(result);
+  buildStatesTable(result.states);
+  updateComparison();
+}
+
+function setCycle(cycle) {
+  currentCycle = cycle;
+  // Update buttons
+  ['otto','diesel','brayton'].forEach(c=>{
+    const btn = document.getElementById(`btn-${c}`);
+    btn.className = `tab-btn border border-slate-700 rounded-xl py-3 px-2 text-center text-xs font-bold uppercase tracking-wide text-slate-400`;
+    if(c===cycle) btn.classList.add(`active-${c}`);
+  });
+  // Description
+  document.getElementById('cycle-description').innerHTML = cycleDescriptions[cycle];
+  // Sliders
+  buildSliders(cycle);
+  // Badge
+  updateBadge(cycle);
+  // Notes
+  updateEngineeringNotes(cycle);
+  // Recalculate
+  updateAll();
+}
+
+// ============================================================
+// INIT
+// ============================================================
+window.addEventListener('load', ()=>{
+  initChart();
+  setCycle('otto');
+});
+</script>
+</body>
+</html>
